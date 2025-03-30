@@ -19,6 +19,11 @@ classdef PSO_Solver < handle    % 定义一个继承自handle的类，使对象�
         gBest        % 群体历史最优解
         gBestFitness % 群体历史最优适应度值
         fitnessHistory % 记录每次迭代的最优适应度，用于绘制收敛曲线
+        UpdateCallback  % 更新回调函数
+        
+        % 添加暂停控制属性
+        IsPaused    logical = false
+        IsRunning   logical = false
     end
     
     methods
@@ -99,56 +104,92 @@ classdef PSO_Solver < handle    % 定义一个继承自handle的类，使对象�
         
         % 主优化函数
         function [bestRoute, bestFitness, history] = optimize(obj)
-            % 返回值：
-            % bestRoute: 最优路径
-            % bestFitness: 最优路径长度
-            % history: 收敛历史记录
+            obj.IsRunning = true;
+            bestSoFar = inf;
             
-            % 迭代优化
-            for iter = 1:obj.maxIter
-                % 惯性权重线性递减策略：从w递减到0.4
-                w_iter = obj.w - (obj.w - 0.4) * iter / obj.maxIter;
-                
-                % 更新每个粒子
-                for i = 1:obj.numParticles
-                    % 生成随机数，用于速度更新公式
-                    r1 = rand(1, obj.numCities);  % 个体认知部分的随机数
-                    r2 = rand(1, obj.numCities);  % 社会认知部分的随机数
+            try
+                for iter = 1:obj.maxIter
+                    % 检查暂停和停止状态
+                    while obj.IsPaused && obj.IsRunning
+                        pause(0.1);
+                        drawnow;
+                    end
                     
-                    % 更新速度：经典PSO速度更新公式
-                    obj.velocities(i,:) = w_iter * obj.velocities(i,:) + ...
-                        obj.c1 * r1 .* (obj.pBest(i,:) - obj.particles(i,:)) + ...
-                        obj.c2 * r2 .* (obj.gBest - obj.particles(i,:));
+                    if ~obj.IsRunning
+                        break;
+                    end
                     
-                    % 根据速度更新位置
-                    % 使用排序映射方法：将连续值映射为离散的排列
-                    [~, newPos] = sort(obj.particles(i,:) + obj.velocities(i,:));
-                    obj.particles(i,:) = newPos;
+                    % 惯性权重线性递减策略
+                    w_iter = obj.w - (obj.w - 0.4) * iter / obj.maxIter;
                     
-                    % 计算新位置的适应度
-                    newFitness = obj.calcFitness(obj.particles(i,:));
-                    
-                    % 更新个体最优
-                    if newFitness < obj.pBestFitness(i)
-                        obj.pBestFitness(i) = newFitness;
-                        obj.pBest(i,:) = obj.particles(i,:);
+                    % 更新每个粒子
+                    for i = 1:obj.numParticles
+                        % 生成随机数，用于速度更新公式
+                        r1 = rand(1, obj.numCities);  % 个体认知部分的随机数
+                        r2 = rand(1, obj.numCities);  % 社会认知部分的随机数
                         
-                        % 更新全局最优
-                        if newFitness < obj.gBestFitness
-                            obj.gBestFitness = newFitness;
-                            obj.gBest = obj.particles(i,:);
+                        % 更新速度：经典PSO速度更新公式
+                        obj.velocities(i,:) = w_iter * obj.velocities(i,:) + ...
+                            obj.c1 * r1 .* (obj.pBest(i,:) - obj.particles(i,:)) + ...
+                            obj.c2 * r2 .* (obj.gBest - obj.particles(i,:));
+                        
+                        % 根据速度更新位置
+                        % 使用排序映射方法：将连续值映射为离散的排列
+                        [~, newPos] = sort(obj.particles(i,:) + obj.velocities(i,:));
+                        obj.particles(i,:) = newPos;
+                        
+                        % 计算新位置的适应度
+                        newFitness = obj.calcFitness(obj.particles(i,:));
+                        
+                        % 更新个体最优
+                        if newFitness < obj.pBestFitness(i)
+                            obj.pBestFitness(i) = newFitness;
+                            obj.pBest(i,:) = obj.particles(i,:);
+                            
+                            % 更新全局最优
+                            if newFitness < obj.gBestFitness
+                                obj.gBestFitness = newFitness;
+                                obj.gBest = obj.particles(i,:);
+                            end
                         end
                     end
+                    
+                    % 更新全局最优解
+                    if obj.gBestFitness < bestSoFar
+                        bestSoFar = obj.gBestFitness;
+                    end
+                    
+                    % 记录当前迭代的最优值（使用历史最优）
+                    obj.fitnessHistory(iter) = bestSoFar;
+                    
+                    % 回调更新显示
+                    if ~isempty(obj.UpdateCallback)
+                        obj.UpdateCallback(obj.gBest, iter, bestSoFar);
+                    end
                 end
-                
-                % 记录当前迭代的最优适应度
-                obj.fitnessHistory(iter) = obj.gBestFitness;
+            catch ME
+                obj.IsRunning = false;
+                rethrow(ME);
             end
             
-            % 返回优化结果
+            obj.IsRunning = false;
             bestRoute = obj.gBest;
             bestFitness = obj.gBestFitness;
             history = obj.fitnessHistory;
+        end
+        
+        % 添加暂停控制方法
+        function pause(obj)
+            obj.IsPaused = true;
+        end
+        
+        function resume(obj)
+            obj.IsPaused = false;
+        end
+        
+        function stop(obj)
+            obj.IsRunning = false;
+            obj.IsPaused = false;
         end
     end
 end

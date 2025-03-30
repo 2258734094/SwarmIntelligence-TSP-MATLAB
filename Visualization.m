@@ -1,7 +1,6 @@
 classdef Visualization < handle
     properties
         % 图形句柄
-        figureHandle    % 主图窗句柄
         routeAxes      % 路径图坐标轴句柄
         convergenceAxes % 收敛曲线坐标轴句柄
         routePlot      % 路径图线条句柄
@@ -28,33 +27,19 @@ classdef Visualization < handle
             
             obj.cityCoords = cityCoords;
             obj.convergenceData = [];
-            
-            % 创建图窗和子图
-            obj.createFigure();
         end
         
-        function createFigure(obj)
-            % 创建并初始化图窗
+        function setAxes(obj, routeAxes, convergenceAxes)
+            % 新增方法：设置坐标轴
+            obj.routeAxes = routeAxes;
+            obj.convergenceAxes = convergenceAxes;
             
-            % 创建新图窗
-            obj.figureHandle = figure('Name', 'TSP-PSO可视化', ...
-                                    'NumberTitle', 'off', ...
-                                    'Position', [100 100 1000 500]);
+            % 清除现有图形
+            cla(obj.routeAxes);
+            cla(obj.convergenceAxes);
             
-            % 创建路径图子图
-            obj.routeAxes = subplot(1, 2, 1);
-            hold(obj.routeAxes, 'on');
-            title(obj.routeAxes, '当前最优路径');
-            xlabel(obj.routeAxes, 'X坐标');
-            ylabel(obj.routeAxes, 'Y坐标');
+            % 设置网格
             grid(obj.routeAxes, 'on');
-            
-            % 创建收敛曲线子图
-            obj.convergenceAxes = subplot(1, 2, 2);
-            hold(obj.convergenceAxes, 'on');
-            title(obj.convergenceAxes, '收敛曲线');
-            xlabel(obj.convergenceAxes, '迭代次数');
-            ylabel(obj.convergenceAxes, '路径长度');
             grid(obj.convergenceAxes, 'on');
             
             % 绘制初始城市点
@@ -65,6 +50,16 @@ classdef Visualization < handle
                               'MarkerSize', obj.markerSize, ...
                               'MarkerFaceColor', obj.cityColor, ...
                               'MarkerEdgeColor', obj.cityColor);
+            
+            % 设置路径图的坐标轴范围
+            minCoords = min(obj.cityCoords);
+            maxCoords = max(obj.cityCoords);
+            margin = (maxCoords - minCoords) * 0.1;
+            xlim(obj.routeAxes, [minCoords(1)-margin(1), maxCoords(1)+margin(1)]);
+            ylim(obj.routeAxes, [minCoords(2)-margin(2), maxCoords(2)+margin(2)]);
+            
+            % 保持坐标轴比例一致
+            axis(obj.routeAxes, 'equal');
         end
         
         function updateRoute(obj, route, iteration, fitness)
@@ -100,11 +95,16 @@ classdef Visualization < handle
             % 更新标题显示当前路径长度
             title(obj.routeAxes, sprintf('当前最优路径 (长度: %.2f)', fitness));
             
+            % 预分配收敛数据数组（如果尚未分配）
+            if isempty(obj.convergenceData)
+                obj.convergenceData = inf(1000, 1);  % 预分配足够大的空间
+            end
+            
             % 更新收敛数据
-            if length(obj.convergenceData) < iteration
+            if iteration == 1
                 obj.convergenceData(iteration) = fitness;
             else
-                obj.convergenceData(iteration) = min(obj.convergenceData(iteration), fitness);
+                obj.convergenceData(iteration) = min(fitness, obj.convergenceData(iteration-1));
             end
             
             % 更新收敛曲线
@@ -153,15 +153,22 @@ classdef Visualization < handle
                 filename = 'tsp_result.png';
             end
             
-            % 保存图形
-            saveas(obj.figureHandle, filename);
+            % 获取当前图形的句柄
+            fig = ancestor(obj.routeAxes, 'figure');
+            saveas(fig, filename);
             fprintf('图形已保存至：%s\n', filename);
         end
         
         function delete(obj)
-            % 析构函数：清理图形对象
-            if ishandle(obj.figureHandle)
-                delete(obj.figureHandle);
+            % 清理图形对象
+            if ishandle(obj.routePlot)
+                delete(obj.routePlot);
+            end
+            if ishandle(obj.convergencePlot)
+                delete(obj.convergencePlot);
+            end
+            if ishandle(obj.cityPlot)
+                delete(obj.cityPlot);
             end
         end
     end

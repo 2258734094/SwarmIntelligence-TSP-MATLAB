@@ -54,29 +54,45 @@ classdef DataInput < handle
                     line = fgetl(fid);
                     line = strtrim(line);  % 去除首尾空格
                     
-                    % 跳过空行
-                    if isempty(line)
+                    % 跳过空行和注释行
+                    if isempty(line) || line(1) == '%'
                         continue;
                     end
                     
                     % 解析文件头信息
-                    if contains(line, 'DIMENSION')
-                        % 获取城市数量
+                    if contains(upper(line), 'DIMENSION')
                         parts = split(line, ':');
-                        dimension = str2double(strtrim(parts{2}));
+                        if length(parts) == 2
+                            dimension = str2double(strtrim(parts{2}));
+                        else
+                            % 某些文件可能使用空格分隔
+                            parts = split(strtrim(line));
+                            dimension = str2double(parts{end});
+                        end
                         coords = zeros(dimension, 2);
                         cityNames = cell(dimension, 1);
-                    elseif contains(line, 'NODE_COORD_SECTION')
-                        % 开始读取坐标
+                    elseif contains(upper(line), 'NODE_COORD_SECTION')
                         readingCoords = true;
                         coordIndex = 1;
-                    elseif readingCoords && coordIndex <= dimension
+                    elseif readingCoords && ~contains(upper(line), 'EOF')
                         % 读取坐标数据
                         parts = split(strtrim(line));
                         if length(parts) >= 3
-                            cityNames{coordIndex} = parts{1};
-                            coords(coordIndex, :) = [str2double(parts{2}), str2double(parts{3})];
-                            coordIndex = coordIndex + 1;
+                            try
+                                % 尝试读取数字
+                                idx = str2double(parts{1});
+                                x = str2double(parts{2});
+                                y = str2double(parts{3});
+                                
+                                % 检查数值是否有效
+                                if ~isnan(idx) && ~isnan(x) && ~isnan(y) && idx <= dimension
+                                    coords(idx, :) = [x, y];
+                                    cityNames{idx} = sprintf('City%d', idx);
+                                end
+                            catch
+                                % 忽略无效行
+                                continue;
+                            end
                         end
                     end
                 end
@@ -84,13 +100,23 @@ classdef DataInput < handle
                 % 关闭文件
                 fclose(fid);
                 
-                % 检查是否成功读取数据
-                if isempty(coords)
-                    error('未能成功读取坐标数据');
+                % 检查数据有效性
+                if isempty(coords) || any(any(coords == 0))
+                    error('无法正确读取坐标数据');
+                end
+                
+                % 删除强制归一化的代码，改为自适应坐标轴范围
+                if ~isempty(coords)
+                    % 计算坐标范围，用于设置显示范围
+                    minCoords = min(coords);
+                    maxCoords = max(coords);
+                    % 添加10%的边距
+                    margin = (maxCoords - minCoords) * 0.1;
+                    % 更新坐标范围
+                    coords_range = [minCoords - margin; maxCoords + margin];
                 end
                 
             catch ME
-                % 错误处理
                 if fid ~= -1
                     fclose(fid);
                 end

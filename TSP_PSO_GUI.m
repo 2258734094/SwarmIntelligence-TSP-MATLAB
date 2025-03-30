@@ -147,11 +147,17 @@ classdef TSP_PSO_GUI < matlab.apps.AppBase
         end
         
         function generateData(app)
-            % 随机生成数据
             try
                 numCities = app.NumCitiesSpinner.Value;
                 app.CityCoords = DataInput.generateRandomData(numCities);
-                updatePlot(app);
+                
+                % 创建新的可视化对象
+                if ~isempty(app.Visualizer)
+                    delete(app.Visualizer);
+                end
+                app.Visualizer = Visualization(app.CityCoords);
+                app.Visualizer.setAxes(app.RouteAxes, app.ConvergenceAxes);
+                
                 app.StatusLabel.Text = sprintf('已生成%d个城市的随机数据', numCities);
             catch ME
                 app.StatusLabel.Text = '生成数据失败';
@@ -160,13 +166,19 @@ classdef TSP_PSO_GUI < matlab.apps.AppBase
         end
         
         function loadData(app)
-            % 加载TSP文件
             try
                 [filename, pathname] = uigetfile({'*.tsp', 'TSP Files (*.tsp)'});
                 if filename ~= 0
                     [app.CityCoords, ~] = DataInput.readTSPFile(fullfile(pathname, filename));
                     app.NumCitiesSpinner.Value = size(app.CityCoords, 1);
-                    updatePlot(app);
+                    
+                    % 创建新的可视化对象
+                    if ~isempty(app.Visualizer)
+                        delete(app.Visualizer);
+                    end
+                    app.Visualizer = Visualization(app.CityCoords);
+                    app.Visualizer.setAxes(app.RouteAxes, app.ConvergenceAxes);
+                    
                     app.StatusLabel.Text = sprintf('已加载文件：%s', filename);
                 end
             catch ME
@@ -176,23 +188,22 @@ classdef TSP_PSO_GUI < matlab.apps.AppBase
         end
         
         function updatePlot(app)
-            % 更新图形显示
-            cla(app.RouteAxes);
-            plot(app.RouteAxes, app.CityCoords(:,1), app.CityCoords(:,2), 'ro');
-            grid(app.RouteAxes, 'on');
-            
-            cla(app.ConvergenceAxes);
-            grid(app.ConvergenceAxes, 'on');
+            if ~isempty(app.Visualizer)
+                delete(app.Visualizer);
+            end
+            if ~isempty(app.CityCoords)
+                app.Visualizer = Visualization(app.CityCoords);
+                app.Visualizer.setAxes(app.RouteAxes, app.ConvergenceAxes);
+            end
         end
         
         function startOptimization(app)
-            % 开始优化
             if isempty(app.CityCoords)
                 errordlg('请先生成或加载数据', '错误');
                 return;
             end
             
-            % 获取参数
+            % 获取PSO参数
             params = struct();
             params.numParticles = app.ParticlesSpinner.Value;
             params.maxIter = app.MaxIterSpinner.Value;
@@ -200,8 +211,16 @@ classdef TSP_PSO_GUI < matlab.apps.AppBase
             params.c1 = app.C1Spinner.Value;
             params.c2 = app.C2Spinner.Value;
             
-            % 创建PSO求解器
+            % 创建PSO求解器前清理旧的实例
+            if ~isempty(app.PSOSolver)
+                delete(app.PSOSolver);
+            end
             app.PSOSolver = PSO_Solver(app.CityCoords, params);
+            
+            % 设置更新回调
+            app.StatusLabel.Text = sprintf('正在优化... (0/%d)', params.maxIter);
+            app.PSOSolver.UpdateCallback = @(route, iter, fitness) ...
+                updateProgress(app, route, iter, fitness);
             
             % 更新按钮状态
             app.StartButton.Enable = 'off';
@@ -212,23 +231,17 @@ classdef TSP_PSO_GUI < matlab.apps.AppBase
             % 设置运行状态
             app.IsRunning = true;
             app.IsPaused = false;
+            app.PSOSolver.IsRunning = true;  % 设置PSO求解器的运行状态
+            app.PSOSolver.IsPaused = false;  % 确保PSO求解器的暂停状态正确
             
-            % 开始优化循环
-            optimizationLoop(app);
-        end
-        
-        function optimizationLoop(app)
-            % 优化主循环
+            % 启动优化
             try
-                % 运行优化
                 [bestRoute, bestFitness, history] = app.PSOSolver.optimize();
-                
-                % 更新最终结果
-                updateFinalResult(app, bestRoute, bestFitness);
-                
+                app.StatusLabel.Text = sprintf('优化完成，最优路径长度：%.2f', bestFitness);
             catch ME
                 app.StatusLabel.Text = '优化过程出错';
-                errordlg(ME.message, '错误');
+                errordlg(sprintf('错误: %s', ME.message), '错误');
+                resetOptimization(app);
             end
             
             % 恢复按钮状态
@@ -245,14 +258,27 @@ classdef TSP_PSO_GUI < matlab.apps.AppBase
             if app.IsPaused
                 app.PauseButton.Text = '继续';
                 app.StatusLabel.Text = '已暂停';
+                app.PSOSolver.pause();  % 调用PSO求解器的暂停方法
             else
                 app.PauseButton.Text = '暂停';
                 app.StatusLabel.Text = '正在优化...';
+                app.PSOSolver.resume();  % 调用PSO求解器的继续方法
             end
         end
         
         function resetOptimization(app)
-            % 重置优化
+            % 停止优化器
+            if ~isempty(app.PSOSolver)
+                app.PSOSolver.stop();
+            end
+            
+            % 重置可视化
+            if ~isempty(app.Visualizer)
+                delete(app.Visualizer);
+                app.Visualizer = [];
+            end
+            
+            % 重置状态和按钮
             app.IsRunning = false;
             app.IsPaused = false;
             app.StartButton.Enable = 'on';
@@ -261,18 +287,19 @@ classdef TSP_PSO_GUI < matlab.apps.AppBase
             app.GenerateButton.Enable = 'on';
             app.PauseButton.Text = '暂停';
             app.StatusLabel.Text = '就绪';
-            updatePlot(app);
+            
+            % 重新初始化显示
+            if ~isempty(app.CityCoords)
+                app.Visualizer = Visualization(app.CityCoords);
+                app.Visualizer.setAxes(app.RouteAxes, app.ConvergenceAxes);
+            end
         end
         
-        function updateFinalResult(app, bestRoute, bestFitness)
-            % 更新最终结果显示
-            app.StatusLabel.Text = sprintf('优化完成，最优路径长度：%.2f', bestFitness);
-            
-            % 绘制最终路径
-            routeCoords = app.CityCoords(bestRoute,:);
-            routeCoords = [routeCoords; routeCoords(1,:)];
-            plot(app.RouteAxes, routeCoords(:,1), routeCoords(:,2), 'b-o');
-            grid(app.RouteAxes, 'on');
+        function updateProgress(app, route, iter, fitness)
+            % 更新进度显示
+            app.StatusLabel.Text = sprintf('正在优化... (%d/%d)', ...
+                iter, app.MaxIterSpinner.Value);
+            app.Visualizer.updateRoute(route, iter, fitness);
         end
     end
     
@@ -283,6 +310,18 @@ classdef TSP_PSO_GUI < matlab.apps.AppBase
             
             % 显示GUI
             app.UIFigure.Visible = 'on';
+        end
+        
+        function delete(app)
+            % 清理PSO求解器
+            if ~isempty(app.PSOSolver)
+                delete(app.PSOSolver);
+            end
+            
+            % 清理可视化对象
+            if ~isempty(app.Visualizer)
+                delete(app.Visualizer);
+            end
         end
     end
 end 
