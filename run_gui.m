@@ -4,4 +4,4 @@ clear;
 close all;
 
 % 启动GUI
-app = TSP_PSO_GUI(); 
+app = TSP_Solver_GUI; 
